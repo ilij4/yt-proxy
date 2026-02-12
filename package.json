@@ -1,0 +1,39 @@
+{
+  "name": "yt-proxy",
+  "version": "1.0.0",
+  "description": "Node.js + TypeScript proxy service for YouTube metadata",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "worker:metadata": "tsx src/workers/metadata-refresh.ts",
+    "worker:metadata:prod": "npm run build && node dist/workers/metadata-refresh.js",
+    "check": "tsc --noEmit",
+    "swagger:init": "npm run build && node dist/scripts/swagger-init.js"
+  },
+  "keywords": [
+    "youtube",
+    "proxy",
+    "typescript",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/swagger": "^9.0.0",
+    "@fastify/swagger-ui": "^5.0.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "mongoose": "^8.9.3",
+    "pino": "^10.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "pino-pretty": "^13.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

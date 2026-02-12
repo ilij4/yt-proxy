@@ -1,0 +1,52 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-proxy-api
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 3000
+      MONGODB_URI: mongodb://mongo:27017/yt_proxy
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  metadata-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-proxy-metadata-worker
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MONGODB_URI: mongodb://mongo:27017/yt_proxy
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+    command: ["node", "dist/workers/metadata-refresh.js"]
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: yt-proxy-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
