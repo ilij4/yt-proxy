@@ -7,8 +7,6 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "worker:metadata": "tsx src/workers/metadata-refresh.ts",
-    "worker:metadata:prod": "npm run build && node dist/workers/metadata-refresh.js",
     "check": "tsc --noEmit",
     "swagger:init": "npm run build && node dist/scripts/swagger-init.js"
   },

@@ -9,7 +9,16 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   MONGODB_URI: z.string().min(1, "MONGODB_URI is required"),
   YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
-  YOUTUBE_API_KEY: z.string().min(1, "YOUTUBE_API_KEY is required")
+  YOUTUBE_API_KEY: z.string().min(1, "YOUTUBE_API_KEY is required"),
+  METADATA_REFRESH_ENABLED: z
+    .preprocess(
+      (value) => (typeof value === "string" ? value.toLowerCase() : value),
+      z.enum(["true", "false"]).default("true")
+    )
+    .transform((value) => value === "true"),
+  METADATA_REFRESH_INTERVAL_MS: z.coerce.number().int().positive().default(60000),
+  METADATA_REFRESH_MAX_VIDEOS_PER_RUN: z.coerce.number().int().positive().default(200),
+  METADATA_REFRESH_CONCURRENCY: z.coerce.number().int().positive().default(5)
 });
 
 const parsed = envSchema.safeParse(process.env);

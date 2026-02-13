@@ -1,6 +1,6 @@
 import { Document, Model, Schema, model } from "mongoose";
 
-export interface VideoLink {
+export interface Video {
   url: string;
   hash: string;
   videoId: string;
@@ -12,9 +12,9 @@ export interface VideoLink {
   updatedAt: Date;
 }
 
-export type VideoLinkDocument = VideoLink & Document;
+export type VideoDocument = Video & Document;
 
-const videoLinkSchema = new Schema<VideoLinkDocument>(
+const videoSchema = new Schema<VideoDocument>(
   {
     url: {
       type: String,
@@ -64,7 +64,7 @@ const videoLinkSchema = new Schema<VideoLinkDocument>(
   }
 );
 
-videoLinkSchema.set("toJSON", {
+videoSchema.set("toJSON", {
   versionKey: false,
   transform: (_, ret: { _id?: unknown; id?: string }) => {
     ret.id = String(ret._id);
@@ -72,4 +72,4 @@ videoLinkSchema.set("toJSON", {
   }
 });
 
-export const VideoLinkModel: Model<VideoLinkDocument> = model<VideoLinkDocument>("VideoLink", videoLinkSchema);
+export const VideoModel: Model<VideoDocument> = model<VideoDocument>("Video", videoSchema, "videolinks");

@@ -13,24 +13,12 @@ services:
       PORT: 3000
       MONGODB_URI: mongodb://mongo:27017/yt_proxy
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
+      METADATA_REFRESH_ENABLED: ${METADATA_REFRESH_ENABLED:-true}
+      METADATA_REFRESH_INTERVAL_MS: ${METADATA_REFRESH_INTERVAL_MS:-60000}
+      METADATA_REFRESH_MAX_VIDEOS_PER_RUN: ${METADATA_REFRESH_MAX_VIDEOS_PER_RUN:-200}
+      METADATA_REFRESH_CONCURRENCY: ${METADATA_REFRESH_CONCURRENCY:-5}
     ports:
       - "3000:3000"
-    restart: unless-stopped
-
-  metadata-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: yt-proxy-metadata-worker
-    depends_on:
-      mongo:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      MONGODB_URI: mongodb://mongo:27017/yt_proxy
-      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
-    command: ["node", "dist/workers/metadata-refresh.js"]
     restart: unless-stopped
 
   mongo:

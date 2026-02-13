@@ -11,7 +11,7 @@ YouTube proxy service built with Node.js + TypeScript + Fastify + MongoDB.
   - `userId` (video owner id)
   - `elo` (number)
   - `category` (string)
-- Optional background worker can refresh changing metadata (views/likes/comments) on a schedule.
+- Built-in scheduler refreshes changing metadata (views/likes/comments) on a schedule.
 - Metadata is cached in MongoDB with section-specific refresh intervals.
 - Endpoints for metadata retrieval:
   - Thumbnail
@@ -52,8 +52,13 @@ docker compose -f docker-compose.mongo.yml up -d
 4. Fill values in `.env`:
 
 - `MONGODB_URI`
+- `YOUTUBE_API_BASE_URL` (optional, default `https://www.googleapis.com/youtube/v3`)
 - `YOUTUBE_API_KEY`
 - `LOG_LEVEL` (optional, default `info`)
+- `METADATA_REFRESH_ENABLED` (optional, default `true`)
+- `METADATA_REFRESH_INTERVAL_MS` (optional, default `60000`)
+- `METADATA_REFRESH_MAX_VIDEOS_PER_RUN` (optional, default `200`)
+- `METADATA_REFRESH_CONCURRENCY` (optional, default `5`)
 - `PORT` (optional, defaults to `3000`)
 
 For Mongo from `docker-compose.mongo.yml`, use:
@@ -66,23 +71,17 @@ For Mongo from `docker-compose.mongo.yml`, use:
 npm run dev
 ```
 
-6. Run metadata refresh worker (optional, separate terminal):
-
-```bash
-npm run worker:metadata
-```
-
-7. Optional quick check:
+6. Optional quick check:
 
 ```bash
 curl http://localhost:3000/api/health
 ```
 
-8. Open Swagger UI:
+7. Open Swagger UI:
 
 - `http://localhost:3000/docs`
 
-9. Generate OpenAPI spec file (optional):
+8. Generate OpenAPI spec file (optional):
 
 ```bash
 npm run swagger:init
@@ -90,7 +89,7 @@ npm run swagger:init
 
 This creates `openapi.json` in the project root.
 
-10. Stop dev Mongo (if started with compose):
+9. Stop dev Mongo (if started with compose):
 
 ```bash
 docker compose -f docker-compose.mongo.yml down
@@ -106,7 +105,7 @@ cp .env.example .env
 
 2. Set at least `YOUTUBE_API_KEY` in `.env` (other values can stay as defaults).
 
-3. Start API + MongoDB + metadata worker:
+3. Start API + MongoDB:
 
 ```bash
 docker compose up --build
@@ -134,7 +133,7 @@ You can also inspect the full API in Swagger UI at `/docs`.
 - Default mode: stale-while-revalidate.
   - if cache is missing: fetch now and store
   - if cache is expired: return stale cache and refresh in background
-- Optional worker mode: run `npm run worker:metadata` to proactively refresh stats for hot videos.
+- Scheduler mode: API process automatically refreshes stats for hot videos in the background.
 - Force fresh data by adding `?refresh=true` to metadata endpoints.
 
 ### 1) Create link
@@ -233,7 +232,5 @@ Supports `?refresh=true`.
 - `npm run dev` - start with live reload
 - `npm run build` - compile TypeScript
 - `npm run start` - run compiled build
-- `npm run worker:metadata` - run simple cron worker for background stats refresh
-- `npm run worker:metadata:prod` - build and run worker from compiled output
 - `npm run check` - type-check only
 - `npm run swagger:init` - generate `openapi.json` from registered routes
