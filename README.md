@@ -1,18 +1,18 @@
 # yt-proxy
 
-YouTube proxy service built with Node.js + TypeScript + Fastify + MongoDB.
+YouTube proxy service built with Node.js + TypeScript + Fastify + Postgres (Kysely).
 
 ## Features
 
 - `POST /api/videos` accepts a YouTube URL and optional hash.
 - If hash is omitted, hash is generated as SHA-256 from normalized URL.
-- URL, hash, and video ID are stored in MongoDB.
+- URL, hash, and video ID are stored in Postgres.
 - Stored video records can also hold service-managed fields:
   - `userId` (video owner id)
   - `elo` (number)
   - `category` (string)
 - Built-in scheduler refreshes changing metadata (views/likes/comments) on a schedule.
-- Metadata is cached in MongoDB with section-specific refresh intervals.
+- Metadata is cached in Postgres with section-specific refresh intervals.
 - Endpoints for metadata retrieval:
   - Thumbnail
   - View/like/comment stats
@@ -22,7 +22,7 @@ YouTube proxy service built with Node.js + TypeScript + Fastify + MongoDB.
 ## Requirements
 
 - Node.js 18+
-- MongoDB
+- Postgres
 - YouTube Data API v3 key
 
 ## Development Mode
@@ -39,19 +39,19 @@ npm install
 cp .env.example .env
 ```
 
-3. Start MongoDB (required):
+3. Start Postgres (required):
 
-Option A: local MongoDB service.
+Option A: local Postgres service.
 
-Option B: Docker Compose (Mongo only):
+Option B: Docker Compose (Postgres only):
 
 ```bash
-docker compose -f docker-compose.mongo.yml up -d
+docker compose -f docker-compose.postgres.yml up -d
 ```
 
 4. Fill values in `.env`:
 
-- `MONGODB_URI`
+- `DATABASE_URL`
 - `YOUTUBE_API_BASE_URL` (optional, default `https://www.googleapis.com/youtube/v3`)
 - `YOUTUBE_API_KEY`
 - `LOG_LEVEL` (optional, default `info`)
@@ -61,27 +61,33 @@ docker compose -f docker-compose.mongo.yml up -d
 - `METADATA_REFRESH_CONCURRENCY` (optional, default `5`)
 - `PORT` (optional, defaults to `3000`)
 
-For Mongo from `docker-compose.mongo.yml`, use:
+For Postgres from `docker-compose.postgres.yml`, use:
 
-- `MONGODB_URI=mongodb://localhost:27017/yt_proxy`
+- `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/yt_proxy`
 
-5. Run API in development:
+5. Run database migrations:
+
+```bash
+npm run db:migrate
+```
+
+6. Run API in development:
 
 ```bash
 npm run dev
 ```
 
-6. Optional quick check:
+7. Optional quick check:
 
 ```bash
 curl http://localhost:3000/api/health
 ```
 
-7. Open Swagger UI:
+8. Open Swagger UI:
 
 - `http://localhost:3000/docs`
 
-8. Generate OpenAPI spec file (optional):
+9. Generate OpenAPI spec file (optional):
 
 ```bash
 npm run swagger:init
@@ -89,10 +95,10 @@ npm run swagger:init
 
 This creates `openapi.json` in the project root.
 
-9. Stop dev Mongo (if started with compose):
+10. Stop dev Postgres (if started with compose):
 
 ```bash
-docker compose -f docker-compose.mongo.yml down
+docker compose -f docker-compose.postgres.yml down
 ```
 
 ## Run with Docker Compose
@@ -105,16 +111,44 @@ cp .env.example .env
 
 2. Set at least `YOUTUBE_API_KEY` in `.env` (other values can stay as defaults).
 
-3. Start API + MongoDB:
+3. Start API + Postgres:
 
 ```bash
 docker compose up --build
 ```
 
-4. Stop services:
+4. Run migrations (from host, pointing `DATABASE_URL` at the compose DB):
+
+```bash
+npm run db:migrate
+```
+
+5. Stop services:
 
 ```bash
 docker compose down
+```
+
+## Migrations
+
+Migrations are managed with dbmate in `db/migrations`. dbmate reads `DATABASE_URL`.
+
+1. Create a migration:
+
+```bash
+npm run db:new -- add_table_name
+```
+
+2. Apply migrations:
+
+```bash
+npm run db:migrate
+```
+
+3. Roll back the last migration:
+
+```bash
+npm run db:rollback
 ```
 
 ## API
@@ -123,7 +157,7 @@ You can also inspect the full API in Swagger UI at `/docs`.
 
 ### Cache behavior
 
-- Data is cached by `videoId` in MongoDB.
+- Data is cached by `videoId` in Postgres.
 - TTL by section:
   - stats: `5 minutes`
   - channel: `20 minutes`

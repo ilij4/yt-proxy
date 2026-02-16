@@ -1,6 +1,14 @@
-import { Document, Model, Schema, model } from "mongoose";
+import type {
+  ChannelMetadata,
+  VideoContentDetails,
+  VideoExtra,
+  VideoSnippet,
+  VideoStatistics,
+  VideoThumbnails
+} from "./video-metadata";
 
 export interface Video {
+  id: string;
   url: string;
   hash: string;
   videoId: string;
@@ -12,64 +20,21 @@ export interface Video {
   updatedAt: Date;
 }
 
-export type VideoDocument = Video & Document;
+export interface VideoMetadataSnapshot {
+  snippet: VideoSnippet | null;
+  extra: VideoExtra | null;
+  contentDetails: VideoContentDetails | null;
+  thumbnails: VideoThumbnails | null;
+  statistics: VideoStatistics | null;
+  channel: ChannelMetadata | null;
+  snippetFetchedAt: Date | null;
+  extraFetchedAt: Date | null;
+  contentDetailsFetchedAt: Date | null;
+  thumbnailsFetchedAt: Date | null;
+  statisticsFetchedAt: Date | null;
+  channelFetchedAt: Date | null;
+}
 
-const videoSchema = new Schema<VideoDocument>(
-  {
-    url: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true
-    },
-    hash: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      index: true
-    },
-    videoId: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      index: true
-    },
-    userId: {
-      type: String,
-      default: null,
-      trim: true,
-      index: true
-    },
-    elo: {
-      type: Number,
-      default: null,
-      index: true
-    },
-    category: {
-      type: String,
-      default: null,
-      trim: true,
-      index: true
-    },
-    lastRequestedAt: {
-      type: Date,
-      default: null,
-      index: true
-    }
-  },
-  {
-    timestamps: true
-  }
-);
-
-videoSchema.set("toJSON", {
-  versionKey: false,
-  transform: (_, ret: { _id?: unknown; id?: string }) => {
-    ret.id = String(ret._id);
-    delete ret._id;
-  }
-});
-
-export const VideoModel: Model<VideoDocument> = model<VideoDocument>("Video", videoSchema, "videolinks");
+export interface VideoWithMetadata extends Video {
+  metadata: VideoMetadataSnapshot;
+}

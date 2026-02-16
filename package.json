@@ -8,13 +8,16 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "check": "tsc --noEmit",
-    "swagger:init": "npm run build && node dist/scripts/swagger-init.js"
+    "swagger:init": "npm run build && node dist/scripts/swagger-init.js",
+    "db:migrate": "dbmate --migrations-dir db/migrations up",
+    "db:rollback": "dbmate --migrations-dir db/migrations rollback",
+    "db:new": "dbmate --migrations-dir db/migrations new"
   },
   "keywords": [
     "youtube",
     "proxy",
     "typescript",
-    "mongodb"
+    "postgres"
   ],
   "author": "",
   "license": "MIT",
@@ -24,12 +27,15 @@
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
-    "mongoose": "^8.9.3",
+    "kysely": "^0.28.11",
+    "pg": "^8.13.1",
     "pino": "^10.1.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "dbmate": "^v2.30.0",
     "pino-pretty": "^13.1.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

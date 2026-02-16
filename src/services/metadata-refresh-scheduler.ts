@@ -1,5 +1,5 @@
-import { VideoMetadataModel } from "../models/video-metadata";
-import { Video, VideoModel } from "../models/video";
+import { db } from "../db/postgres";
+import type { VideoRow } from "../db/types";
 import { env } from "../config/env";
 import { getCachedVideoStatistics } from "./video-metadata-cache";
 import { createLogger } from "../utils/logger";
@@ -22,10 +22,12 @@ const MIN_MS = 60 * 1000;
 let intervalRef: NodeJS.Timeout | null = null;
 let cycleInProgress = false;
 
-function getTargetRefreshMs(video: Video): number {
+type RefreshCandidate = Pick<VideoRow, "video_id" | "elo" | "created_at" | "last_requested_at">;
+
+function getTargetRefreshMs(video: RefreshCandidate): number {
     const now = Date.now();
-    const lastRequestedAt = video.lastRequestedAt?.getTime() ?? 0;
-    const ageMs = now - video.createdAt.getTime();
+    const lastRequestedAt = video.last_requested_at?.getTime() ?? 0;
+    const ageMs = now - video.created_at.getTime();
 
     if ((lastRequestedAt > 0 && now - lastRequestedAt <= 30 * MIN_MS) || (video.elo ?? 0) >= 1600) {
         return 5 * MIN_MS;
@@ -71,37 +73,41 @@ async function runRefreshCycle(): Promise<void> {
         const activeCutoff = new Date(now - 7 * DAY_MS);
         const newVideoCutoff = new Date(now - 2 * DAY_MS);
 
-        const videos = (await VideoModel.find({
-            $or: [
-                { lastRequestedAt: { $gte: activeCutoff } },
-                { createdAt: { $gte: newVideoCutoff } },
-                { elo: { $gte: 1200 } }
-            ]
-        })
-            .sort({ lastRequestedAt: -1, elo: -1, createdAt: -1 })
+        const videos = await db
+            .selectFrom("videos")
+            .select(["video_id", "elo", "created_at", "last_requested_at"])
+            .where((eb) =>
+                eb.or([
+                    eb("last_requested_at", ">=", activeCutoff),
+                    eb("created_at", ">=", newVideoCutoff),
+                    eb("elo", ">=", 1200)
+                ])
+            )
+            .orderBy("last_requested_at", "desc")
+            .orderBy("elo", "desc")
+            .orderBy("created_at", "desc")
             .limit(env.METADATA_REFRESH_MAX_VIDEOS_PER_RUN)
-            .select({ videoId: 1, elo: 1, createdAt: 1, lastRequestedAt: 1 })
-            .lean());
+            .execute();
 
         if (videos.length === 0) {
             schedulerLogger.info("No candidate videos");
             return;
         }
 
-        const videoIds = videos.map((video) => video.videoId);
-        const caches = await VideoMetadataModel.find({
-            videoId: { $in: videoIds }
-        })
-            .select({ videoId: 1, statisticsFetchedAt: 1 })
-            .lean();
+        const videoIds = videos.map((video) => video.video_id);
+        const caches = await db
+            .selectFrom("video_statistics")
+            .select(["video_id", "fetched_at"])
+            .where("video_id", "in", videoIds)
+            .execute();
 
         const statsFetchedAtByVideoId = new Map<string, Date | null>();
         for (const cache of caches) {
-            statsFetchedAtByVideoId.set(cache.videoId, cache.statisticsFetchedAt ?? null);
+            statsFetchedAtByVideoId.set(cache.video_id, cache.fetched_at ?? null);
         }
 
         const dueVideos = videos.filter((video) => {
-            const statsFetchedAt = statsFetchedAtByVideoId.get(video.videoId);
+            const statsFetchedAt = statsFetchedAtByVideoId.get(video.video_id);
             if (!statsFetchedAt) {
                 return true;
             }
@@ -118,11 +124,11 @@ async function runRefreshCycle(): Promise<void> {
 
         await runWithConcurrency(dueVideos, env.METADATA_REFRESH_CONCURRENCY, async (video) => {
             try {
-                await getCachedVideoStatistics(video.videoId, true);
+                await getCachedVideoStatistics(video.video_id, true);
                 success += 1;
             } catch (error) {
                 failed += 1;
-                schedulerLogger.error({ err: error, videoId: video.videoId }, "Failed metadata refresh for video");
+                schedulerLogger.error({ err: error, videoId: video.video_id }, "Failed metadata refresh for video");
             }
         });
 

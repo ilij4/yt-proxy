@@ -1,12 +1,7 @@
-import { ChannelMetadata, VideoContentDetails, VideoExtra, VideoMetadataDocument, VideoMetadataModel, VideoSnippet, VideoStatistics, VideoThumbnails } from "../models/video-metadata";
-import type {
-    YouTubeApiVideoMetadata,
-} from "../models/youtube-api-types";
-import {
-    buildThumbnailSet,
-    fetchChannelMetadata,
-    fetchVideoParts
-} from "./youtube";
+import { ChannelMetadata, VideoContentDetails, VideoExtra, VideoSnippet, VideoStatistics, VideoThumbnails } from "../models/video-metadata";
+import { db } from "../db/postgres";
+import type { YouTubeApiVideoMetadata } from "../models/youtube-api-types";
+import { youTubeService } from "./youtube";
 import { VideoSection, type VideoPart } from "./video-sections";
 import { canonicalYouTubeUrl } from "../utils/youtube-url";
 import { createLogger } from "../utils/logger";
@@ -29,18 +24,24 @@ const SECTION_TTL_MS: Record<VideoSection, number> = {
 
 const refreshInFlight = new Map<string, Promise<void>>();
 
-interface CacheUpdates {
-    snippet?: VideoSnippet | null;
-    extra?: VideoExtra | null;
-    contentDetails?: VideoContentDetails | null;
-    thumbnails?: VideoThumbnails | null;
-    statistics?: VideoStatistics | null;
-    channel?: ChannelMetadata | null;
-    snippetFetchedAt?: Date | null;
-    contentDetailsFetchedAt?: Date | null;
-    thumbnailsFetchedAt?: Date | null;
-    statisticsFetchedAt?: Date | null;
-    channelFetchedAt?: Date | null;
+interface VideoMetadataCache {
+    snippet: VideoSnippet | null;
+    extra: VideoExtra | null;
+    content_details: VideoContentDetails | null;
+    thumbnails: VideoThumbnails | null;
+    statistics: VideoStatistics | null;
+    channel: ChannelMetadata | null;
+    snippet_fetched_at: Date | null;
+    extra_fetched_at: Date | null;
+    content_details_fetched_at: Date | null;
+    thumbnails_fetched_at: Date | null;
+    statistics_fetched_at: Date | null;
+    channel_fetched_at: Date | null;
+}
+
+interface SectionUpdate<T> {
+    data: T | null;
+    fetchedAt: Date;
 }
 
 function uniqueSections(sections: VideoSection[]): VideoSection[] {
@@ -54,7 +55,7 @@ function isExpired(date: Date | null, ttlMs: number): boolean {
     return Date.now() - date.getTime() > ttlMs;
 }
 
-function hasSectionData(cache: VideoMetadataDocument, section: VideoSection): boolean {
+function hasSectionData(cache: VideoMetadataCache, section: VideoSection): boolean {
     if (section === VideoSection.Snippet) {
         return cache.snippet !== null && cache.extra !== null;
     }
@@ -64,51 +65,127 @@ function hasSectionData(cache: VideoMetadataDocument, section: VideoSection): bo
     }
 
     if (section === VideoSection.ContentDetails) {
-        return cache.contentDetails !== null;
+        return cache.content_details !== null;
     }
 
     if (section === VideoSection.Thumbnails) {
         return cache.thumbnails !== null;
     }
 
-    return cache.channelFetchedAt !== null;
+    return cache.channel_fetched_at !== null;
 }
 
-function getSectionFetchedAt(cache: VideoMetadataDocument, section: VideoSection): Date | null {
+function getSectionFetchedAt(cache: VideoMetadataCache, section: VideoSection): Date | null {
     if (section === VideoSection.Snippet) {
-        return cache.snippetFetchedAt;
+        return cache.snippet_fetched_at ?? cache.extra_fetched_at;
     }
 
     if (section === VideoSection.Statistics) {
-        return cache.statisticsFetchedAt;
+        return cache.statistics_fetched_at;
     }
 
     if (section === VideoSection.ContentDetails) {
-        return cache.contentDetailsFetchedAt;
+        return cache.content_details_fetched_at;
     }
 
     if (section === VideoSection.Thumbnails) {
-        return cache.thumbnailsFetchedAt;
+        return cache.thumbnails_fetched_at;
     }
 
-    return cache.channelFetchedAt;
+    return cache.channel_fetched_at;
 }
 
-async function getOrCreateCache(videoId: string): Promise<VideoMetadataDocument> {
-    const existing = await VideoMetadataModel.findOne({ videoId });
-    if (existing) {
-        return existing;
-    }
+async function getCache(videoId: string): Promise<VideoMetadataCache> {
+    const [
+        snippetRow,
+        extraRow,
+        contentDetailsRow,
+        thumbnailsRow,
+        statisticsRow,
+        channelRow
+    ] = await Promise.all([
+        db.selectFrom("video_snippets").select(["data", "fetched_at"]).where("video_id", "=", videoId).executeTakeFirst(),
+        db.selectFrom("video_extras").select(["data", "fetched_at"]).where("video_id", "=", videoId).executeTakeFirst(),
+        db.selectFrom("video_content_details").select(["data", "fetched_at"]).where("video_id", "=", videoId).executeTakeFirst(),
+        db.selectFrom("video_thumbnails").select(["data", "fetched_at"]).where("video_id", "=", videoId).executeTakeFirst(),
+        db.selectFrom("video_statistics").select(["data", "fetched_at"]).where("video_id", "=", videoId).executeTakeFirst(),
+        db.selectFrom("channel_metadata").select(["data", "fetched_at"]).where("video_id", "=", videoId).executeTakeFirst()
+    ]);
 
-    try {
-        return await VideoMetadataModel.create({ videoId });
-    } catch {
-        const raceWinner = await VideoMetadataModel.findOne({ videoId });
-        if (raceWinner) {
-            return raceWinner;
-        }
-        throw new Error(`Failed to create metadata cache for video ${videoId}`);
-    }
+    return {
+        snippet: (snippetRow?.data as VideoSnippet | null) ?? null,
+        extra: (extraRow?.data as VideoExtra | null) ?? null,
+        content_details: (contentDetailsRow?.data as VideoContentDetails | null) ?? null,
+        thumbnails: (thumbnailsRow?.data as VideoThumbnails | null) ?? null,
+        statistics: (statisticsRow?.data as VideoStatistics | null) ?? null,
+        channel: (channelRow?.data as ChannelMetadata | null) ?? null,
+        snippet_fetched_at: snippetRow?.fetched_at ?? null,
+        extra_fetched_at: extraRow?.fetched_at ?? null,
+        content_details_fetched_at: contentDetailsRow?.fetched_at ?? null,
+        thumbnails_fetched_at: thumbnailsRow?.fetched_at ?? null,
+        statistics_fetched_at: statisticsRow?.fetched_at ?? null,
+        channel_fetched_at: channelRow?.fetched_at ?? null
+    };
+}
+
+async function upsertSnippet(videoId: string, update: SectionUpdate<VideoSnippet>): Promise<void> {
+    await db
+        .insertInto("video_snippets")
+        .values({ video_id: videoId, data: update.data, fetched_at: update.fetchedAt })
+        .onConflict((oc) =>
+            oc.column("video_id").doUpdateSet({ data: update.data, fetched_at: update.fetchedAt })
+        )
+        .execute();
+}
+
+async function upsertExtra(videoId: string, update: SectionUpdate<VideoExtra>): Promise<void> {
+    await db
+        .insertInto("video_extras")
+        .values({ video_id: videoId, data: update.data, fetched_at: update.fetchedAt })
+        .onConflict((oc) =>
+            oc.column("video_id").doUpdateSet({ data: update.data, fetched_at: update.fetchedAt })
+        )
+        .execute();
+}
+
+async function upsertContentDetails(videoId: string, update: SectionUpdate<VideoContentDetails>): Promise<void> {
+    await db
+        .insertInto("video_content_details")
+        .values({ video_id: videoId, data: update.data, fetched_at: update.fetchedAt })
+        .onConflict((oc) =>
+            oc.column("video_id").doUpdateSet({ data: update.data, fetched_at: update.fetchedAt })
+        )
+        .execute();
+}
+
+async function upsertThumbnails(videoId: string, update: SectionUpdate<VideoThumbnails>): Promise<void> {
+    await db
+        .insertInto("video_thumbnails")
+        .values({ video_id: videoId, data: update.data, fetched_at: update.fetchedAt })
+        .onConflict((oc) =>
+            oc.column("video_id").doUpdateSet({ data: update.data, fetched_at: update.fetchedAt })
+        )
+        .execute();
+}
+
+async function upsertStatistics(videoId: string, update: SectionUpdate<VideoStatistics>): Promise<void> {
+    await db
+        .insertInto("video_statistics")
+        .values({ video_id: videoId, data: update.data, fetched_at: update.fetchedAt })
+        .onConflict((oc) =>
+            oc.column("video_id").doUpdateSet({ data: update.data, fetched_at: update.fetchedAt })
+        )
+        .execute();
+}
+
+async function upsertChannel(videoId: string, update: SectionUpdate<ChannelMetadata>): Promise<void> {
+    await db
+        .insertInto("channel_metadata")
+        .values({ video_id: videoId, data: update.data, fetched_at: update.fetchedAt })
+        .onConflict((oc) =>
+            oc.column("video_id").doUpdateSet({ data: update.data, fetched_at: update.fetchedAt })
+        )
+        .execute();
 }
 
 async function refreshSections(videoId: string, sections: VideoSection[]): Promise<void> {
@@ -117,13 +194,19 @@ async function refreshSections(videoId: string, sections: VideoSection[]): Promi
         return;
     }
 
-    const existing = await getOrCreateCache(videoId);
+    const existing = await getCache(videoId);
     const now = new Date();
-    const updates: CacheUpdates = {};
+    const updates: {
+        snippet?: SectionUpdate<VideoSnippet>;
+        extra?: SectionUpdate<VideoExtra>;
+        content_details?: SectionUpdate<VideoContentDetails>;
+        thumbnails?: SectionUpdate<VideoThumbnails>;
+        statistics?: SectionUpdate<VideoStatistics>;
+        channel?: SectionUpdate<ChannelMetadata>;
+    } = {};
 
     if (targetSections.includes(VideoSection.Thumbnails)) {
-        updates.thumbnails = buildThumbnailSet(videoId);
-        updates.thumbnailsFetchedAt = now;
+        updates.thumbnails = { data: youTubeService.buildThumbnailSet(videoId), fetchedAt: now };
     }
 
     const videoParts: VideoPart[] = [];
@@ -138,48 +221,63 @@ async function refreshSections(videoId: string, sections: VideoSection[]): Promi
     }
 
     if (videoParts.length > 0) {
-        const partsData = await fetchVideoParts(videoId, videoParts);
+        const partsData = await youTubeService.fetchVideoParts(videoId, videoParts);
 
         if (partsData.snippet) {
-            updates.snippet = partsData.snippet;
-            updates.extra = partsData.extra ?? {
-                tags: [],
-                categoryId: null,
-                defaultLanguage: null
+            updates.snippet = { data: partsData.snippet, fetchedAt: now };
+            updates.extra = {
+                data: partsData.extra ?? {
+                    tags: [],
+                    categoryId: null,
+                    defaultLanguage: null
+                },
+                fetchedAt: now
             };
-            updates.snippetFetchedAt = now;
         }
 
         if (partsData.statistics) {
-            updates.statistics = partsData.statistics;
-            updates.statisticsFetchedAt = now;
+            updates.statistics = { data: partsData.statistics, fetchedAt: now };
         }
 
         if (partsData.contentDetails) {
-            updates.contentDetails = partsData.contentDetails;
-            updates.contentDetailsFetchedAt = now;
+            updates.content_details = { data: partsData.contentDetails, fetchedAt: now };
         }
     }
 
     if (targetSections.includes(VideoSection.Channel)) {
-        const snippetFromUpdate = updates.snippet as VideoSnippet | undefined;
-        const snippetFromCache = existing.snippet as VideoSnippet | null;
+        const snippetFromUpdate = updates.snippet?.data;
+        const snippetFromCache = existing.snippet;
         const channelId = snippetFromUpdate?.channelId ?? snippetFromCache?.channelId ?? null;
 
         if (channelId) {
-            updates.channel = await fetchChannelMetadata(channelId);
+            updates.channel = { data: await youTubeService.fetchChannelMetadata(channelId), fetchedAt: now };
         } else {
-            updates.channel = null;
+            updates.channel = { data: null, fetchedAt: now };
         }
-        updates.channelFetchedAt = now;
     }
 
-    if (Object.keys(updates).length > 0) {
-        await VideoMetadataModel.findOneAndUpdate(
-            { videoId },
-            { $set: updates },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
+    const operations: Promise<void>[] = [];
+    if (updates.snippet) {
+        operations.push(upsertSnippet(videoId, updates.snippet));
+    }
+    if (updates.extra) {
+        operations.push(upsertExtra(videoId, updates.extra));
+    }
+    if (updates.content_details) {
+        operations.push(upsertContentDetails(videoId, updates.content_details));
+    }
+    if (updates.thumbnails) {
+        operations.push(upsertThumbnails(videoId, updates.thumbnails));
+    }
+    if (updates.statistics) {
+        operations.push(upsertStatistics(videoId, updates.statistics));
+    }
+    if (updates.channel) {
+        operations.push(upsertChannel(videoId, updates.channel));
+    }
+
+    if (operations.length > 0) {
+        await Promise.all(operations);
     }
 }
 
@@ -208,19 +306,19 @@ async function ensureSections(
     videoId: string,
     requestedSections: VideoSection[],
     forceRefresh = false
-): Promise<VideoMetadataDocument> {
+): Promise<VideoMetadataCache> {
     const sections = uniqueSections(requestedSections);
-    let cache = await getOrCreateCache(videoId);
+    let cache = await getCache(videoId);
 
     if (forceRefresh) {
         await refreshSections(videoId, sections);
-        return getOrCreateCache(videoId);
+        return getCache(videoId);
     }
 
     const missing = sections.filter((section) => !hasSectionData(cache, section));
     if (missing.length > 0) {
         await refreshSections(videoId, missing);
-        cache = await getOrCreateCache(videoId);
+        cache = await getCache(videoId);
     }
 
     const expired = sections.filter((section) => {
@@ -269,10 +367,10 @@ function toExtra(value: unknown): VideoExtra {
 
 function toThumbnails(videoId: string, value: unknown): VideoThumbnails {
     const thumbnails = value as VideoThumbnails | null;
-    return thumbnails ?? buildThumbnailSet(videoId);
+    return thumbnails ?? youTubeService.buildThumbnailSet(videoId);
 }
 
-function toMetadata(videoId: string, cache: VideoMetadataDocument): YouTubeApiVideoMetadata {
+function toMetadata(videoId: string, cache: VideoMetadataCache): YouTubeApiVideoMetadata {
     const snippet = cache.snippet;
     return {
         videoId,
@@ -282,7 +380,7 @@ function toMetadata(videoId: string, cache: VideoMetadataDocument): YouTubeApiVi
         publishedAt: snippet?.publishedAt ?? null,
         thumbnails: toThumbnails(videoId, cache.thumbnails),
         statistics: toStatistics(cache.statistics),
-        contentDetails: toContentDetails(cache.contentDetails),
+        contentDetails: toContentDetails(cache.content_details),
         extra: toExtra(cache.extra),
         channel: cache.channel ?? null
     };

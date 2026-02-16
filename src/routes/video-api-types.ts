@@ -1,4 +1,4 @@
-import type { VideoDocument } from "../models/video";
+import type { Video, VideoWithMetadata } from "../models/video";
 import { VideoThumbnails, VideoStatistics, ChannelMetadata } from "../models/video-metadata";
 import type {
     YouTubeApiVideoMetadata,
@@ -9,12 +9,12 @@ export type VideoSortOrder = "asc" | "desc";
 
 export interface CreateVideoResponse {
     created: boolean;
-    data: VideoDocument;
+    data: Video;
 }
 
 export interface UpdateVideoResponse {
     updated: boolean;
-    data: VideoDocument;
+    data: Video;
 }
 
 export interface ListVideosResponse {
@@ -24,7 +24,7 @@ export interface ListVideosResponse {
     totalPages: number;
     sortBy: VideoSortBy;
     sortOrder: VideoSortOrder;
-    items: unknown[];
+    items: VideoWithMetadata[];
 }
 
 export interface VideoMetadataResponse {

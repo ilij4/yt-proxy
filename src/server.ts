@@ -1,6 +1,6 @@
 import { app } from "./app";
 import { env } from "./config/env";
-import { connectToDatabase } from "./db/mongoose";
+import { connectToDatabase, disconnectFromDatabase } from "./db/postgres";
 import { startMetadataRefreshScheduler, stopMetadataRefreshScheduler } from "./services/metadata-refresh-scheduler";
 import { createLogger } from "./utils/logger";
 
@@ -18,6 +18,7 @@ async function shutdown(signal: string): Promise<void> {
 
   try {
     await app.close();
+    await disconnectFromDatabase();
     serverLogger.info("Shutdown complete");
     process.exit(0);
   } catch (error) {
